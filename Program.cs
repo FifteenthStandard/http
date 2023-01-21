@@ -3,15 +3,25 @@ using System.Net.Sockets;
 
 var argSet = new HashSet<string>(args);
 var isHttp = argSet.Remove("--http");
-if (argSet.Count != 1)
+if (argSet.Count > 1)
 {
-    Console.Error.WriteLine("Usage: http <request-file> [--http]");
+    Console.Error.WriteLine("Usage: http [<request-file>] [--http]");
     return 1;
 }
-var requestFile = argSet.Single();
+var requestFile = argSet.SingleOrDefault();
+var useStdin = requestFile == null || requestFile == "-";
+
+if (useStdin)
+{
+    requestFile = Path.GetTempFileName();
+    using (var stream = new FileStream(requestFile, FileMode.Open))
+    {
+        await Console.OpenStandardInput().CopyToAsync(stream);
+    }
+}
 
 var hostHeaderPrefix = "Host: ";
-var hostHeader = (await File.ReadAllLinesAsync(requestFile))
+var hostHeader = (await File.ReadAllLinesAsync(requestFile!))
     .FirstOrDefault(line => line.StartsWith(hostHeaderPrefix));
 if (hostHeader == null)
 {
@@ -37,10 +47,12 @@ async Task<Stream> GetStream(TcpClient tcpClient, string host, bool isHttp)
 
 using (var tcpClient = new TcpClient(host, port))
 using (var networkStream = await GetStream(tcpClient, host, isHttp))
-using (var fileStream = new FileStream(requestFile, FileMode.Open))
+using (var fileStream = new FileStream(requestFile!, FileMode.Open))
 {
     await fileStream.CopyToAsync(networkStream);
     await networkStream.CopyToAsync(Console.OpenStandardOutput());
 }
+
+if (useStdin) File.Delete(requestFile!);
 
 return 0;
